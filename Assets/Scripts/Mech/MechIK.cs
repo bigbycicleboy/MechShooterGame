@@ -37,6 +37,8 @@ public class QuadrupedMechIK : MonoBehaviour
     [Header("Ground Detection")]
     [SerializeField] private LayerMask groundLayer;
     [SerializeField] private float groundCheckDistance = 3f;
+    [SerializeField] private float footClearance = 0.15f;
+    [SerializeField] private float footRaycastStartHeight = 2f;
     
     [Header("Body Tilt")]
     [SerializeField] private Transform bodyTransform;
@@ -69,9 +71,9 @@ public class QuadrupedMechIK : MonoBehaviour
                 
                 // Raycast down to find ground
                 RaycastHit hit;
-                if (Physics.Raycast(footPos + Vector3.up * 2f, Vector3.down, out hit, groundCheckDistance, groundLayer))
+                if (Physics.Raycast(footPos + Vector3.up * footRaycastStartHeight, Vector3.down, out hit, groundCheckDistance + footRaycastStartHeight, groundLayer))
                 {
-                    leg.footTarget.position = hit.point;
+                    leg.footTarget.position = hit.point + hit.normal * footClearance;
                 }
                 else
                 {
@@ -248,6 +250,12 @@ public class QuadrupedMechIK : MonoBehaviour
         
         // Clamp to never go below the end position's Y
         currentPos.y = Mathf.Max(currentPos.y, leg.endPos.y);
+
+        if (TryGetGround(currentPos, out RaycastHit hit))
+        {
+            float minY = hit.point.y + footClearance;
+            currentPos.y = Mathf.Max(currentPos.y, minY);
+        }
         
         leg.footTarget.position = currentPos;
         leg.footTarget.rotation = Quaternion.Slerp(leg.startRot, leg.endRot, leg.lerpTime);
@@ -269,15 +277,15 @@ public class QuadrupedMechIK : MonoBehaviour
         Vector3 worldOffset = transform.TransformDirection(footPositionOffset);
         
         RaycastHit hit;
-        if (Physics.Raycast(anticipatedPos + Vector3.up * 2f, Vector3.down, out hit, groundCheckDistance, groundLayer))
+        if (TryGetGround(anticipatedPos, out hit))
         {
-            targetRotation = transform.rotation * Quaternion.Euler(footRotationOffset);
+            targetRotation = Quaternion.FromToRotation(transform.up, hit.normal) * transform.rotation * Quaternion.Euler(footRotationOffset);
             
             // Apply local offset in world space
-            return hit.point + Vector3.up * 0.15f + worldOffset;
+            return hit.point + hit.normal * footClearance + worldOffset;
         }
         
-        anticipatedPos.y = transform.position.y - bodyHeight + 0.15f;
+        anticipatedPos.y = transform.position.y - bodyHeight + footClearance;
         targetRotation = transform.rotation * Quaternion.Euler(footRotationOffset);
         return anticipatedPos + worldOffset;
     }
@@ -292,14 +300,21 @@ public class QuadrupedMechIK : MonoBehaviour
         Vector3 worldOffset = transform.TransformDirection(footPositionOffset);
         
         RaycastHit hit;
-        if (Physics.Raycast(desiredPos + Vector3.up * 2f, Vector3.down, out hit, groundCheckDistance, groundLayer))
+        if (TryGetGround(desiredPos, out hit))
         {
-            Vector3 footPos = hit.point + Vector3.up * 0.1f + worldOffset;
+            Vector3 footPos = hit.point + hit.normal * footClearance + worldOffset;
             leg.footTarget.position = Vector3.Lerp(leg.footTarget.position, footPos, Time.deltaTime * 5f);
             
-            Quaternion targetRotation = transform.rotation * Quaternion.Euler(180f, 0f, 0f);
+            Quaternion targetRotation = Quaternion.FromToRotation(transform.up, hit.normal) * transform.rotation * Quaternion.Euler(footRotationOffset);
             leg.footTarget.rotation = Quaternion.Slerp(leg.footTarget.rotation, targetRotation, Time.deltaTime * rotationSpeed);
         }
+    }
+
+    bool TryGetGround(Vector3 samplePoint, out RaycastHit hit)
+    {
+        Vector3 rayOrigin = samplePoint + Vector3.up * footRaycastStartHeight;
+        float rayDistance = groundCheckDistance + footRaycastStartHeight;
+        return Physics.Raycast(rayOrigin, Vector3.down, out hit, rayDistance, groundLayer);
     }
     
     void UpdateKneeHints()
